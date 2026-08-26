@@ -1,0 +1,122 @@
+/*
+ * Laboratorio - Control Electrónico (Lazo Cerrado Motor DC)
+ * Escuela Colombiana de Ingeniería Julio Garavito
+ * Actuador: L298N (Pin ENABLE) - Sensor: Voltaje inducido (Acondicionado)
+ */
+
+#include <Arduino.h>
+
+// -------------------------------------------------------------------
+// CONFIGURACIÓN DE PINES Y HARDWARE
+// -------------------------------------------------------------------
+const int PIN_ENABLE = 32; // Pin ENABLE del puente H L298 (Señal PWM)
+const int PIN_SENSOR = 34; // Pin ADC para leer el voltaje inducido acondicionado
+
+const float V_FUENTE = 15.0; // Voltaje de la fuente de alimentación del motor
+const float MAX_ADC = 4095.0; // Resolución máxima del ADC del ESP32 (12 bits)
+
+// Parámetros del PWM
+uint32_t pwmFrequency  = 5000; 
+uint8_t  pwmResolution = 10;   // 10 bits = rango de 0 a 1023
+const int pwmChannel   = 0;    
+
+// -------------------------------------------------------------------
+// VARIABLES DEL CONTROLADOR DE LAZO CERRADO
+// -------------------------------------------------------------------
+float K = 1.0;            // Ganancia Proporcional (K)
+float referencia = 15.0;  // r(t): Voltaje objetivo (Equivalente a velocidad)
+float salidaMedida = 0.0; // y(t): Voltaje medido del motor
+float esfuerzoControl = 0.0; // u(t): Voltaje calculado por el controlador
+
+// Temporizador de muestreo discreto (Ts)
+unsigned long tiempoAnterior = 0;
+const unsigned long periodoMuestreo = 10; // Ts = 10 ms (Frecuencia de 100 Hz)
+
+// Función para calcular el valor máximo del PWM
+uint32_t getMaxDuty(uint8_t bits) {
+  return (1 << bits) - 1; 
+}
+
+// Función para aplicar la señal PWM
+void applyDutyCycle(uint32_t val) {
+  #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+    ledcWrite(PIN_ENABLE, val);
+  #else
+    ledcWrite(pwmChannel, val);
+  #endif
+}
+
+// Inicialización del PWM
+void setupPWM(uint32_t freq, uint8_t bits) {
+  #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+    ledcDetach(PIN_ENABLE);
+    ledcAttach(PIN_ENABLE, freq, bits);
+  #else
+    ledcSetup(pwmChannel, freq, bits);
+    ledcAttachPin(PIN_ENABLE, pwmChannel);
+  #endif
+}
+
+void setup() {
+  Serial.begin(115200);
+  setupPWM(pwmFrequency, pwmResolution);
+  analogReadResolution(12); // Aseguramos resolución de 12 bits en la lectura
+  
+  Serial.println("\n--- CONTROLADOR PROPORCIONAL LAZO CERRADO ---");
+  Serial.println("Comandos:");
+  Serial.println("  K<valor>  -> Cambiar Ganancia Proporcional (Ej: K2.5)");
+  Serial.println("  R<valor>  -> Cambiar Referencia en Volts (Ej: R10.5)");
+  Serial.println("-----------------------------------------\n");
+}
+
+void loop() {
+  // 1. RECEPCIÓN DE COMANDOS (Monitor Serial)
+  if (Serial.available() > 0) {
+    String input = Serial.readStringUntil('\n');
+    input.trim();
+
+    if (input.length() > 1) {
+      char command = toupper(input.charAt(0));
+      float value = input.substring(1).toFloat();
+
+      if (command == 'K') {
+        K = value;
+        Serial.print("[OK] Ganancia K ajustada a: "); Serial.println(K);
+      } 
+      else if (command == 'R') {
+        referencia = value;
+        // Saturamos la referencia para no exigir más del voltaje de la fuente
+        if(referencia > V_FUENTE) referencia = V_FUENTE;
+        Serial.print("[OK] Referencia ajustada a: "); Serial.println(referencia);
+      }
+    }
+  }
+
+  // 2. BUCLE DE CONTROL DISCRETO
+  unsigned long tiempoActual = millis();
+  if (tiempoActual - tiempoAnterior >= periodoMuestreo) {
+    tiempoAnterior = tiempoActual;
+
+    // A. Lectura del Sensor y Escalado a Voltios reales (0 a 15V)
+    int lecturaADC = analogRead(PIN_SENSOR); 
+    salidaMedida = (lecturaADC / MAX_ADC) * V_FUENTE; 
+    
+    // B. Cálculo del Error e(t)
+    float error = referencia - salidaMedida;
+
+    // C. Ley de Control Proporcional: u(t) = K * e(t)
+    esfuerzoControl = K * error;
+
+    // D. Saturación del esfuerzo de control (Física del L298)
+    // El puente H no puede entregar más voltaje del que tiene en la fuente
+    if (esfuerzoControl > V_FUENTE) esfuerzoControl = V_FUENTE;
+    if (esfuerzoControl < 0.0) esfuerzoControl = 0.0; // Sistema unidireccional
+
+    // E. Conversión de Voltaje a valor PWM (Mapeo del Actuador)
+    uint32_t maxPwmVal = getMaxDuty(pwmResolution);
+    uint32_t dutyCycleVal = (uint32_t)((esfuerzoControl / V_FUENTE) * maxPwmVal);
+
+    // F. Ejecución
+    applyDutyCycle(dutyCycleVal);
+  }
+}    
