@@ -1,0 +1,68 @@
+% =========================================================================
+% 0. EXTRACCIÓN DE LA SEÑAL
+% =========================================================================
+% Dependiendo de cómo Simulink guardó los datos, descomenta la línea correcta:
+
+
+ senal = out.senal; 
+
+% Opción C: Si se guardó como 'timeseries' (común en versiones recientes)
+% senal = out.senal_sbpa.Data; 
+
+% Aseguramos que sea un vector columna para facilitar los cálculos
+senal = senal(:); 
+
+% Parámetros de tiempo (¡IMPORTANTE! Modifica Ts con el de tu modelo)
+Ts = 0.001;          % Tiempo de muestreo del bloque z^-1 (ejemplo basado en tu foto)
+Fs = 1/Ts;           % Frecuencia de muestreo
+L = length(senal);   % Número total de muestras de la señal
+
+% Crear figura de alta calidad
+fig = figure('Name', 'Análisis de Señal SBPA', 'NumberTitle', 'off', 'Position', [100, 100, 800, 900]);
+
+% =========================================================================
+% 1. AUTO-CORRELACIÓN
+% =========================================================================
+% Se usa 'biased' para que la amplitud se escale correctamente
+[rxx, lags] = xcorr(senal, 'biased'); 
+tiempo_lags = lags * Ts;
+
+subplot(3,1,1);
+plot(tiempo_lags, rxx, 'LineWidth', 1.5, 'Color', '#0072BD');
+title('\textbf{Auto-correlación de la SBPA}', 'Interpreter', 'latex', 'FontSize', 12);
+xlabel('Rezagos (Lag) [s]', 'Interpreter', 'latex');
+ylabel('$R_{xx}(\tau)$', 'Interpreter', 'latex');
+grid on;
+
+% =========================================================================
+% 2. CONVOLUCIÓN DISCRETA
+% =========================================================================
+% Convolución de la señal consigo misma
+c = conv(senal, senal);
+n_conv = (0:length(c)-1) * Ts; % Vector de tiempo equivalente para la convolución
+
+subplot(3,1,2);
+plot(n_conv, c, 'LineWidth', 1.5, 'Color', '#D95319');
+title('\textbf{Convolución Discreta}', 'Interpreter', 'latex', 'FontSize', 12);
+xlabel('Tiempo [s]', 'Interpreter', 'latex');
+ylabel('Amplitud', 'Interpreter', 'latex');
+grid on;
+
+% =========================================================================
+% 3. TRANSFORMADA RÁPIDA DE FOURIER (FFT)
+% =========================================================================
+Y = fft(senal);
+P2 = abs(Y/L);                      % Espectro de dos caras
+P1 = P2(1:floor(L/2)+1);            % Espectro de una cara (solo frecuencias positivas)
+P1(2:end-1) = 2*P1(2:end-1);        % Compensar la energía de la parte negativa
+
+% Vector de frecuencias en Hz
+f = Fs*(0:(floor(L/2)))/L; 
+
+subplot(3,1,3);
+plot(f, P1, 'LineWidth', 1.5, 'Color', '#77AC30');
+title('\textbf{Espectro de Magnitud (FFT)}', 'Interpreter', 'latex', 'FontSize', 12);
+xlabel('Frecuencia ($f$) [Hz]', 'Interpreter', 'latex');
+ylabel('$|P_1(f)|$', 'Interpreter', 'latex');
+grid on;
+xlim([0 Fs/2]); % Limitar la vista hasta la frecuencia de Nyquist
