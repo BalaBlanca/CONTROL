@@ -1,0 +1,87 @@
+% =========================================================================
+% SIMULACIÓN DE PLANTA CONTINUA CON RUIDO SBPA (ESTADO ESTACIONARIO + DARK THEME)
+% =========================================================================
+
+% 1. Extraer la señal SBPA y asegurar que sea vector columna
+ruido_sbpa = out.senal(:); 
+
+% 2. Parámetros de Tiempo (Forzamos 5 segundos de simulación)
+Ts = 0.001; 
+t_final = 5; 
+t = (0:Ts:t_final)'; 
+N = length(t);
+
+% 3. Construcción de la Señal de Entrada (u_total) paso a paso
+u_total = zeros(N, 1); % El sistema inicia en 0V
+
+% Definir los instantes de transición
+t_escalon = 0.5; % Momento en que ocurre el escalón a 5.5V
+% Momento de inyección del ruido: 5 taus después del escalón (5 * 0.6s = 3.0s)
+t_estacionario = t_escalon + 3.0; 
+
+% Encontrar los índices en el vector de tiempo
+idx_escalon = find(t >= t_escalon, 1);
+idx_ruido = find(t >= t_estacionario, 1);
+
+% A. Aplicar el escalón de 5.5V
+u_total(idx_escalon:end) = 5.5;
+
+% B. Preparar el ruido (repetirlo si la muestra de Simulink es muy corta)
+largo_ruido_necesario = N - idx_ruido + 1;
+ruido_extendido = repmat(ruido_sbpa, ceil(largo_ruido_necesario / length(ruido_sbpa)), 1);
+ruido_extendido = ruido_extendido(1:largo_ruido_necesario); % Cortar al tamaño exacto
+
+% Transformación bipolar para oscilar entre +10% y -10% (de [0, 1] a [-1, 1])
+ruido_bipolar = 2 * (ruido_extendido - 0.5);
+
+% C. Adecuación del ruido (Amplitud del 10% de 5.5V = 0.55V)
+amplitud_ruido = 5.5 * 0.10; 
+
+% Sumar el ruido a la señal de entrada a partir del estado estacionario
+u_total(idx_ruido:end) = u_total(idx_ruido:end) + (ruido_bipolar * amplitud_ruido);
+
+% 4. Definición de la Planta y Simulación
+% Planta identificada en la práctica anterior
+s = tf('s');
+G = 0.673 / (0.6*s + 1);
+
+% Simular sistema continuo
+y_salida = lsim(G, u_total, t);
+
+% =========================================================================
+% 5. Visualización de Resultados (DARK THEME)
+% =========================================================================
+colorFondo = [0.15 0.15 0.15]; 
+colorEjes = 'w';
+
+fig = figure('Name', 'Respuesta de la Planta con Ruido', 'Color', colorFondo, 'Position', [100, 100, 800, 600]);
+
+% Gráfica de la Entrada (u)
+ax1 = subplot(2,1,1);
+plot(t, u_total, 'Color', '#00FFFF', 'LineWidth', 1.2); % Cian
+hold on;
+plot([0, t(end)], [5.5, 5.5], 'w--', 'LineWidth', 1.5); % Referencia del escalón
+
+set(ax1, 'Color', colorFondo, 'XColor', colorEjes, 'YColor', colorEjes, 'GridColor', colorEjes); 
+title('\textbf{Señal de Entrada: Escalón + SBPA ($u_t$)}', 'Interpreter', 'latex', 'Color', 'w', 'FontSize', 14);
+xlabel('Tiempo [s]', 'Interpreter', 'latex', 'Color', 'w');
+ylabel('Amplitud [V]', 'Interpreter', 'latex', 'Color', 'w');
+grid on;
+legend('Entrada Total', 'Referencia 5.5V', 'Interpreter', 'latex', 'Location', 'northwest', 'TextColor', 'w', 'Color', [0.2 0.2 0.2], 'EdgeColor', 'w');
+xlim([0 t(end)]);
+ylim([-0.5 6.5]); 
+
+% Gráfica de la Salida de la Planta (y)
+ax2 = subplot(2,1,2);
+plot(t, y_salida, 'Color', '#FF5555', 'LineWidth', 1.5); % Rojo claro
+hold on;
+y_ss_esperado = 5.5 * 0.673; 
+plot([0, t(end)], [y_ss_esperado, y_ss_esperado], 'w--', 'LineWidth', 1.5);
+
+set(ax2, 'Color', colorFondo, 'XColor', colorEjes, 'YColor', colorEjes, 'GridColor', colorEjes); 
+title('\textbf{Respuesta de la Planta ($y_t$)}', 'Interpreter', 'latex', 'Color', 'w', 'FontSize', 14);
+xlabel('Tiempo [s]', 'Interpreter', 'latex', 'Color', 'w');
+ylabel('Amplitud [V]', 'Interpreter', 'latex', 'Color', 'w');
+grid on;
+legend('Salida de la Planta', 'Estado Estacionario Ideal', 'Interpreter', 'latex', 'Location', 'southeast', 'TextColor', 'w', 'Color', [0.2 0.2 0.2], 'EdgeColor', 'w');
+xlim([0 t(end)]);
