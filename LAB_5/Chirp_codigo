@@ -1,0 +1,101 @@
+% =========================================================================
+% ANÁLISIS Y SIMULACIÓN DE SEÑAL CHIRP (DARK THEME)
+% =========================================================================
+
+% 1. Parámetros de Tiempo
+Ts = 0.001; 
+t_final = 10; % Ampliamos a 10s para ver bien el barrido de frecuencias
+t = (0:Ts:t_final)'; 
+N = length(t);
+
+% 2. Creación de la señal Chirp
+f_inicial = 0.1; % Hz (Por debajo del ancho de banda)
+f_final = 10;    % Hz (Muy por encima del ancho de banda de 0.265 Hz)
+% Genera un Chirp que barre de f_inicial a f_final en t_final segundos
+senal_chirp = chirp(t, f_inicial, t_final, f_final); 
+
+% =========================================================================
+% PARTE A: ANÁLISIS DE LA SEÑAL CHIRP (Punto 2 de la guía)
+% =========================================================================
+colorFondo = [0.15 0.15 0.15]; colorEjes = 'w';
+fig1 = figure('Name', 'Análisis de Señal Chirp', 'Color', colorFondo, 'Position', [100, 100, 800, 900]);
+
+% 1. Auto-correlación
+[rxx_chirp, lags] = xcorr(senal_chirp, 'biased'); 
+tiempo_lags = lags * Ts;
+ax1 = subplot(3,1,1);
+plot(tiempo_lags, rxx_chirp, 'Color', '#00FFFF', 'LineWidth', 1.5);
+set(ax1, 'Color', colorFondo, 'XColor', colorEjes, 'YColor', colorEjes, 'GridColor', colorEjes);
+title('\textbf{Auto-correlación del Chirp}', 'Interpreter', 'latex', 'Color', 'w', 'FontSize', 12);
+xlabel('Rezagos (Lag) [s]', 'Interpreter', 'latex', 'Color', 'w');
+ylabel('$R_{xx}(\tau)$', 'Interpreter', 'latex', 'Color', 'w');
+grid on;
+
+% 2. Convolución Discreta
+c_chirp = conv(senal_chirp, senal_chirp);
+n_conv = (0:length(c_chirp)-1) * Ts; 
+ax2 = subplot(3,1,2);
+plot(n_conv, c_chirp, 'Color', '#FF5555', 'LineWidth', 1.5);
+set(ax2, 'Color', colorFondo, 'XColor', colorEjes, 'YColor', colorEjes, 'GridColor', colorEjes);
+title('\textbf{Convolución Discreta}', 'Interpreter', 'latex', 'Color', 'w', 'FontSize', 12);
+xlabel('Tiempo [s]', 'Interpreter', 'latex', 'Color', 'w');
+ylabel('Amplitud', 'Interpreter', 'latex', 'Color', 'w');
+grid on;
+
+% 3. FFT
+Y_chirp = fft(senal_chirp);
+P2_c = abs(Y_chirp/N);
+P1_c = P2_c(1:floor(N/2)+1);
+P1_c(2:end-1) = 2*P1_c(2:end-1);
+f_vec = (1/Ts)*(0:(floor(N/2)))/N; 
+ax3 = subplot(3,1,3);
+plot(f_vec, P1_c, 'Color', '#55FF55', 'LineWidth', 1.5); % Verde brillante
+set(ax3, 'Color', colorFondo, 'XColor', colorEjes, 'YColor', colorEjes, 'GridColor', colorEjes);
+title('\textbf{Espectro de Magnitud (FFT)}', 'Interpreter', 'latex', 'Color', 'w', 'FontSize', 12);
+xlabel('Frecuencia ($f$) [Hz]', 'Interpreter', 'latex', 'Color', 'w');
+ylabel('$|P_1(f)|$', 'Interpreter', 'latex', 'Color', 'w');
+xlim([0 15]); % Hacemos zoom hasta 15 Hz para ver el bloque del Chirp
+grid on;
+
+% =========================================================================
+% PARTE B: INYECCIÓN A LA PLANTA (Punto 4 de la guía)
+% =========================================================================
+% Reconstrucción de la señal de entrada con el escalón y estado estacionario
+u_total = zeros(N, 1);
+t_escalon = 0.5;
+t_estacionario = t_escalon + 3.0; 
+idx_escalon = find(t >= t_escalon, 1);
+idx_ruido = find(t >= t_estacionario, 1);
+
+u_total(idx_escalon:end) = 5.5; % Escalón base
+
+% Adecuar el Chirp (Amplitud del 10% de 5.5V = 0.55V)
+amplitud_ruido = 5.5 * 0.10; 
+% Se inyecta el Chirp solo a partir del estado estacionario
+u_total(idx_ruido:end) = u_total(idx_ruido:end) + (senal_chirp(1:(N-idx_ruido+1)) * amplitud_ruido);
+
+% Simulación de la Planta
+s = tf('s');
+G = 0.673 / (0.6*s + 1);
+y_salida = lsim(G, u_total, t);
+
+% Gráficas de Simulación
+fig2 = figure('Name', 'Respuesta con Chirp', 'Color', colorFondo, 'Position', [150, 150, 800, 600]);
+
+% Entrada
+ax4 = subplot(2,1,1);
+plot(t, u_total, 'Color', '#00FFFF', 'LineWidth', 1.2);
+hold on; plot([0, t(end)], [5.5, 5.5], 'w--', 'LineWidth', 1.5);
+set(ax4, 'Color', colorFondo, 'XColor', colorEjes, 'YColor', colorEjes, 'GridColor', colorEjes); 
+title('\textbf{Entrada: Escalón + Chirp ($u_t$)}', 'Interpreter', 'latex', 'Color', 'w', 'FontSize', 14);
+xlabel('Tiempo [s]', 'Interpreter', 'latex', 'Color', 'w'); ylabel('Amplitud [V]', 'Interpreter', 'latex', 'Color', 'w');
+grid on; xlim([0 t(end)]); ylim([-0.5 6.5]);
+
+% Salida
+ax5 = subplot(2,1,2);
+plot(t, y_salida, 'Color', '#FF5555', 'LineWidth', 1.5);
+hold on; plot([0, t(end)], [5.5*0.673, 5.5*0.673], 'w--', 'LineWidth', 1.5);
+set(ax5, 'Color', colorFondo, 'XColor', colorEjes, 'YColor', colorEjes, 'GridColor', colorEjes); 
+title('\textbf{Respuesta de la Planta ($y_t$)}', 'Interpreter', 'latex', 'Color', 'w', 'FontSize', 14);
+xlabel('Tiempo [s]', 'Interpreter', 'latex', 'Color', 'w'); ylabel('Amplitud [V]', 'Interpreter', 'latex', 'Color', 'w');
+grid on; xlim([0 t(end)]);
