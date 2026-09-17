@@ -1,0 +1,110 @@
+% =========================================================================
+% ANÁLISIS Y SIMULACIÓN EN LAZO CERRADO: PWM ALEATORIO (DARK THEME)
+% =========================================================================
+
+% 1. Parámetros de Tiempo
+Ts = 0.001; 
+t_final = 5; 
+t = (0:Ts:t_final)'; 
+N = length(t);
+
+% 2. Generación del PWM con Ancho de Pulso Aleatorio
+f_pwm = 10; % Frecuencia base del PWM (10 Hz)
+T_pwm = 1/f_pwm; % Periodo del PWM
+
+% Crear vector de ciclos de trabajo aleatorios
+num_periodos = ceil(t_final / T_pwm);
+duty_aleatorio = 0.1 + 0.8 * rand(num_periodos, 1); 
+
+% Mapear el tiempo actual
+indices_periodo = floor(t / T_pwm) + 1;
+indices_periodo = min(indices_periodo, num_periodos); 
+senal_duty = duty_aleatorio(indices_periodo); 
+
+% Generar señal y convertir a bipolar
+portadora = (sawtooth(2*pi*f_pwm*t) + 1) / 2;
+pwm_unipolar = double(portadora < senal_duty);
+pwm_bipolar = 2 * (pwm_unipolar - 0.5);
+
+% =========================================================================
+% PARTE A: ANÁLISIS DE LA SEÑAL PWM (Punto 3 de la guía)
+% =========================================================================
+colorFondo = [0.15 0.15 0.15]; colorEjes = 'w';
+fig1 = figure('Name', 'Análisis de Señal PWM Aleatoria', 'Color', colorFondo, 'Position', [100, 100, 800, 900]);
+
+% 1. Auto-correlación
+[rxx_pwm, lags] = xcorr(pwm_bipolar, 'biased'); 
+tiempo_lags = lags * Ts;
+ax1 = subplot(3,1,1);
+plot(tiempo_lags, rxx_pwm, 'Color', '#00FFFF', 'LineWidth', 1.5);
+set(ax1, 'Color', colorFondo, 'XColor', colorEjes, 'YColor', colorEjes, 'GridColor', colorEjes);
+title('\textbf{Auto-correlación del PWM Aleatorio}', 'Interpreter', 'latex', 'Color', 'w', 'FontSize', 12);
+xlabel('Rezagos (Lag) [s]', 'Interpreter', 'latex', 'Color', 'w'); ylabel('$R_{xx}(\tau)$', 'Interpreter', 'latex', 'Color', 'w'); grid on;
+
+% 2. Convolución Discreta
+c_pwm = conv(pwm_bipolar, pwm_bipolar);
+n_conv = (0:length(c_pwm)-1) * Ts; 
+ax2 = subplot(3,1,2);
+plot(n_conv, c_pwm, 'Color', '#FF5555', 'LineWidth', 1.5);
+set(ax2, 'Color', colorFondo, 'XColor', colorEjes, 'YColor', colorEjes, 'GridColor', colorEjes);
+title('\textbf{Convolución Discreta}', 'Interpreter', 'latex', 'Color', 'w', 'FontSize', 12);
+xlabel('Tiempo [s]', 'Interpreter', 'latex', 'Color', 'w'); ylabel('Amplitud', 'Interpreter', 'latex', 'Color', 'w'); grid on;
+
+% 3. FFT
+Y_pwm = fft(pwm_bipolar);
+P2_pwm = abs(Y_pwm/N);
+P1_pwm = P2_pwm(1:floor(N/2)+1);
+P1_pwm(2:end-1) = 2*P1_pwm(2:end-1);
+f_vec = (1/Ts)*(0:(floor(N/2)))/N; 
+ax3 = subplot(3,1,3);
+plot(f_vec, P1_pwm, 'Color', '#55FF55', 'LineWidth', 1.5);
+set(ax3, 'Color', colorFondo, 'XColor', colorEjes, 'YColor', colorEjes, 'GridColor', colorEjes);
+title('\textbf{Espectro de Magnitud (FFT)}', 'Interpreter', 'latex', 'Color', 'w', 'FontSize', 12);
+xlabel('Frecuencia ($f$) [Hz]', 'Interpreter', 'latex', 'Color', 'w'); ylabel('$|P_1(f)|$', 'Interpreter', 'latex', 'Color', 'w');
+xlim([0 100]); grid on;
+
+% =========================================================================
+% PARTE B: INYECCIÓN AL SISTEMA EN LAZO CERRADO
+% =========================================================================
+% 1. Definición de Planta y Controlador
+s = tf('s');
+G = 0.673 / (0.6*s + 1);
+K = 10; % Ganancia ajustable
+
+% --- SELECCIÓN DE CONTROLADOR ---
+C_controlador = K * (0.6*s + 1) / (6*s + 1);      % ATRASO (Lag)
+% C_controlador = K * (0.6*s + 1) / (0.06*s + 1); % ADELANTO (Lead)
+
+% Sistema en lazo cerrado
+sys_lazo_cerrado = feedback(C_controlador * G, 1);
+
+% 2. Construcción de la Señal de Referencia (Escalón + PWM)
+r_total = zeros(N, 1);
+t_escalon = 0.5;
+t_estacionario = t_escalon + 3.0; 
+idx_escalon = find(t >= t_escalon, 1);
+idx_ruido = find(t >= t_estacionario, 1);
+
+r_total(idx_escalon:end) = 5.5; % Escalón base
+amplitud_ruido = 5.5 * 0.10; 
+r_total(idx_ruido:end) = r_total(idx_ruido:end) + (pwm_bipolar(idx_ruido:end) * amplitud_ruido);
+
+% 3. Simulación del Sistema en Lazo Cerrado
+y_salida = lsim(sys_lazo_cerrado, r_total, t);
+
+% 4. Gráficas de Simulación
+fig2 = figure('Name', 'Lazo Cerrado con PWM Aleatorio', 'Color', colorFondo, 'Position', [150, 150, 800, 600]);
+
+ax4 = subplot(2,1,1);
+plot(t, r_total, 'Color', '#00FFFF', 'LineWidth', 1.2); hold on; plot([0, t(end)], [5.5, 5.5], 'w--', 'LineWidth', 1.5);
+set(ax4, 'Color', colorFondo, 'XColor', colorEjes, 'YColor', colorEjes, 'GridColor', colorEjes); 
+title('\textbf{Referencia: Escalón + PWM Aleatorio ($r_t$)}', 'Interpreter', 'latex', 'Color', 'w', 'FontSize', 14);
+xlabel('Tiempo [s]', 'Interpreter', 'latex', 'Color', 'w'); ylabel('Amplitud [V]', 'Interpreter', 'latex', 'Color', 'w');
+grid on; xlim([0 t(end)]); ylim([-0.5 6.5]); legend('Referencia Total', 'Referencia 5.5V', 'Interpreter', 'latex', 'Location', 'northwest', 'TextColor', 'w', 'Color', [0.2 0.2 0.2], 'EdgeColor', 'w');
+
+ax5 = subplot(2,1,2);
+plot(t, y_salida, 'Color', '#FF5555', 'LineWidth', 1.5); hold on; plot([0, t(end)], [5.5, 5.5], 'w--', 'LineWidth', 1.5);
+set(ax5, 'Color', colorFondo, 'XColor', colorEjes, 'YColor', colorEjes, 'GridColor', colorEjes); 
+title('\textbf{Respuesta del Sistema Controlado ($y_t$)}', 'Interpreter', 'latex', 'Color', 'w', 'FontSize', 14);
+xlabel('Tiempo [s]', 'Interpreter', 'latex', 'Color', 'w'); ylabel('Amplitud [V]', 'Interpreter', 'latex', 'Color', 'w');
+grid on; xlim([0 t(end)]); legend('Salida de la Planta', 'Referencia Deseada', 'Interpreter', 'latex', 'Location', 'southeast', 'TextColor', 'w', 'Color', [0.2 0.2 0.2], 'EdgeColor', 'w');
